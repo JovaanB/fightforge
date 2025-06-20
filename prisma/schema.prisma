@@ -1,0 +1,368 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  
+  age           Int?
+  weight        Float?
+  height        Float?
+  experience    ExperienceLevel?
+  
+  fightDate     DateTime?
+  fightType     FightType?
+  goals         Goal[]
+  
+  trainingFrequency String?
+  currentCondition  ConditionLevel?
+  injuries         String?
+  
+  benchPress    Float?
+  squat         Float?
+  deadlift      Float?
+  
+  sessionsPerWeek   Int?
+  sessionDuration   Int?
+  equipment         Equipment[]
+  
+  accounts      Account[]
+  sessions      Session[]
+  programs      UserProgram[]
+  workouts      WorkoutSession[]
+
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  subscriptionStatus    String?
+  subscriptionPlan      String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Program {
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  duration    Int    // weeks
+  difficulty  DifficultyLevel
+  
+  // Program structure
+  phases      Phase[]
+  exercises   Exercise[]
+  
+  // User assignments
+  userPrograms UserProgram[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UserProgram {
+  id        String @id @default(cuid())
+  userId    String
+  programId String
+  
+  // Program customization
+  startDate DateTime
+  endDate   DateTime?
+  isActive  Boolean @default(true)
+  
+  // Progress tracking
+  currentWeek Int @default(1)
+  currentPhase Int @default(1)
+  
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program   Program @relation(fields: [programId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, programId])
+}
+
+model Phase {
+  id          String @id @default(cuid())
+  programId   String
+  name        String
+  description String?
+  weekStart   Int
+  weekEnd     Int
+  focus       String? // "strength", "power", "endurance", etc.
+  
+  program     Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  workouts    Workout[]
+  
+  @@unique([programId, weekStart])
+}
+
+model Workout {
+  id          String @id @default(cuid())
+  phaseId     String
+  name        String
+  description String?
+  week        Int
+  session     Int
+  type        WorkoutType
+  
+  phase       Phase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  sections    WorkoutSection[] // Nouveau: sections au lieu d'exercices directs
+  sessions    WorkoutSession[]
+}
+
+// Nouveau modèle pour les sections de workout
+model WorkoutSection {
+  id          String @id @default(cuid())
+  workoutId   String
+  name        String // "EXTENDED WARM-UP", "SUPERSET 1", "CORE CIRCUIT"
+  type        SectionType
+  order       Int
+  description String?
+  restBetweenSets Int? // repos entre séries (si applicable)
+  isCircuit   Boolean @default(false) // true pour circuits sans pause
+  circuitSets Int? // nombre de tours du circuit
+  
+  workout     Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exercises   SectionExercise[]
+  
+  @@unique([workoutId, order])
+}
+
+// Exercices dans une section (remplace WorkoutExercise)
+model SectionExercise {
+  id          String @id @default(cuid())
+  sectionId   String
+  exerciseId  String
+  order       Int
+  
+  // Paramètres d'exercice
+  sets        Int?
+  reps        String? // "8", "6 e/s", "30 secondes"
+  weight      Float?
+  duration    Int? // en secondes pour les holds
+  restAfter   Int? // repos après cet exercice (pour supersets)
+  tempo       String?
+  rpe         Int?
+  notes       String?
+  
+  // Grouping (pour supersets)
+  supersetGroup String? // "1A", "1B", etc.
+  
+  // Exercices bilatéraux
+  isUnilateral Boolean @default(false) // true pour "de chaque côté"
+  
+  section     WorkoutSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+  
+  @@unique([sectionId, order])
+}
+
+// Nouveaux types d'enum
+enum SectionType {
+  WARMUP
+  SUPERSET
+  CIRCUIT
+  STRENGTH
+  CARDIO
+  COOLDOWN
+}
+
+model Exercise {
+  id            String @id @default(cuid())
+  programId     String?
+  name          String
+  description   String?
+  category      ExerciseCategory
+  muscleGroups  MuscleGroup[]
+  equipment     Equipment[]
+  videoUrl      String?
+  instructions  String[]
+  isBodyweight  Boolean @default(false)  // Nouveau champ pour les exercices au poids du corps
+  
+  program       Program? @relation(fields: [programId], references: [id])
+  sectionExercises SectionExercise[]  
+  setResults    SetResult[]
+  
+  createdAt     DateTime @default(now())
+}
+
+// User workout tracking
+model WorkoutSession {
+  id          String @id @default(cuid())
+  userId      String
+  workoutId   String
+  
+  startTime   DateTime
+  endTime     DateTime?
+  completed   Boolean @default(false)
+  notes       String?
+  
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workout     Workout @relation(fields: [workoutId], references: [id])
+  sets        SetResult[]
+  
+  createdAt   DateTime @default(now())
+}
+
+model SetResult {
+  id               String @id @default(cuid())
+  workoutSessionId String
+  exerciseId       String
+  setNumber        Int
+  
+  reps        Int?
+  weight      Float?
+  duration    Int?    // seconds for time-based exercises
+  distance    Float?  // meters for cardio
+  rpe         Int?
+  completed   Boolean @default(true)
+  
+  workoutSession WorkoutSession @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+  exercise       Exercise @relation(fields: [exerciseId], references: [id])
+}
+
+// Enums
+enum ExperienceLevel {
+  BEGINNER    // moins de 6 mois
+  NOVICE      // 6 mois - 2 ans
+  INTERMEDIATE // 2-5 ans
+  ADVANCED    // 5+ ans
+  ELITE       // Elite/Compétiteur
+}
+
+enum FightType {
+  AMATEUR_FIGHT
+  PRO_FIGHT
+  SPARRING
+  COMPETITION
+  TRAINING_CAMP
+  FITNESS
+}
+
+enum Goal {
+  EXPLOSIVE_POWER
+  CARDIO_ENDURANCE
+  MAX_STRENGTH
+  PUNCH_SPEED
+  AGILITY_MOBILITY
+  MUSCULAR_ENDURANCE
+}
+
+enum ConditionLevel {
+  POOR
+  FAIR
+  GOOD
+  EXCELLENT
+}
+
+enum Equipment {
+  DUMBBELLS
+  KETTLEBELLS
+  BARBELL
+  PUNCHING_BAG
+  JUMP_ROPE
+  TREADMILL
+  RESISTANCE_BANDS
+  CABLE_MACHINE
+  MEDICINE_BALL
+  JUMP_BOX
+}
+
+enum DifficultyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  ELITE
+}
+
+enum WorkoutType {
+  STRENGTH
+  CARDIO
+  PLYOMETRIC
+  MOBILITY
+  BOXING_TECHNIQUE
+  MIXED
+}
+
+enum ExerciseCategory {
+  BILATERAL_LIFT
+  UNILATERAL_LIFT
+  HORIZONTAL_PRESS
+  VERTICAL_PRESS
+  HORIZONTAL_PULL
+  VERTICAL_PULL
+  SQUAT_PATTERN
+  HINGE_PATTERN
+  CARRY
+  CORE
+  PLYOMETRIC
+  CARDIO
+  BOXING_SPECIFIC
+  MOBILITY
+  WARM_UP
+}
+
+enum MuscleGroup {
+  CHEST
+  BACK
+  SHOULDERS
+  BICEPS
+  TRICEPS
+  FOREARMS
+  CORE
+  GLUTES
+  QUADRICEPS
+  HAMSTRINGS
+  CALVES
+  ANKLES
+  FULL_BODY
+}
